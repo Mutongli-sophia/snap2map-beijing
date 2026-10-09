@@ -85,7 +85,16 @@ def gcj_to_wgs(lon,lat):
 
 with st.sidebar:
     st.header('API 设置')
-    amap_key=st.text_input('高德 Web 服务 API Key',value=os.getenv('AMAP_API_KEY',''),type='password')
+ 
+    amap_key = st.secrets.get("AMAP_API_KEY", "")
+
+    if amap_key:
+        st.success("高德地图已连接，可以直接使用")
+    else:
+        amap_key = st.text_input(
+            "高德 Web 服务 API Key",
+            type="password"
+        )
     st.caption('ChatGPT 负责识别截图：此版本无需 OpenAI API Key。请勿公开高德 Key。')
 
 if 'places_df' not in st.session_state:
