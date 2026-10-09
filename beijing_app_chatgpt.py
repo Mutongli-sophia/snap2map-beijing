@@ -15,15 +15,6 @@ st.set_page_config(page_title='Snap2Map 北京选址', page_icon='📍', layout=
 st.title('📍 Snap2Map · 北京选址（ChatGPT 粘贴版）')
 st.caption('ChatGPT 识别截图 → 粘贴地点 → 高德定位 → 北京通勤比较（测试版）')
 
-SAMPLE = [
- ('北方工业大学','晋元庄路5号','可预约'),('国家林业和草原局管理干部学院','林校北路8号','可预约'),
- ('ATA国际认证中心（北京北清路）','北清路103号中科产业园1B楼','可预约'),('北京市黄庄职业高中','鲁谷东街29号','可预约'),
- ('北京市商业学校（昌平校区）','曹八西路28号','可预约'),('北京市海淀区金科培训学校','亮甲店130号华玉大厦二层','可预约'),
- ('中国传媒大学','定福庄东街1号','可预约'),('北京信息职业技术学院（南区）','花乡辛庄90号','可预约'),
- ('北京市仪器仪表高级技工学校（西城校区）','西什库大街31号','可预约'),('首钢工学院（南门入校）','晋元庄路6号','可预约'),
- ('中国石油大学润杰公寓','东环路148号润杰公寓','可预约'),('首都医科大学花乡校区','花乡张家路口107号','可预约'),
- ('潘家园街道社区综合体（原创享空间）','潘家园华威北里23号楼东侧','可预约'),('北京开放大学东城分校','东四西大街48号','可预约'),
- ('首都师范大学信息工程学院','西三环北路56号','预约已满'),('向导教学中心','羊坊店东路5号博望园底商二层','可预约')]
 COLUMNS = ['name','address','availability']
 
 def amap(endpoint, params, key):
@@ -84,18 +75,17 @@ def gcj_to_wgs(lon,lat):
     return lon-dlon,lat-dlat
 
 with st.sidebar:
-    st.header('API 设置')
- 
-    amap_key = st.secrets.get("AMAP_API_KEY", "")
-
+    st.header('地图服务')
+    try:
+        secret_key = st.secrets.get('AMAP_API_KEY', '')
+    except (FileNotFoundError, KeyError):
+        secret_key = ''
+    amap_key = secret_key or os.getenv('AMAP_API_KEY', '')
     if amap_key:
-        st.success("高德地图已连接，可以直接使用")
+        st.success('高德地图已连接，可以直接使用')
     else:
-        amap_key = st.text_input(
-            "高德 Web 服务 API Key",
-            type="password"
-        )
-    st.caption('ChatGPT 负责识别截图：此版本无需 OpenAI API Key。请勿公开高德 Key。')
+        amap_key = st.text_input('高德 Web 服务 API Key', type='password')
+    st.caption('截图由 ChatGPT 识别，本网站无需 OpenAI API Key。')
 
 if 'places_df' not in st.session_state:
     st.session_state.places_df=pd.DataFrame(columns=COLUMNS)
@@ -103,27 +93,39 @@ if 'mapped' not in st.session_state:
     st.session_state.mapped=None
 
 st.subheader('① 从 ChatGPT 粘贴地点')
-st.write('把截图发给 ChatGPT，让它输出每行「地点名称、地址、预约状态」三列，用 Tab 分隔。复制到下面的文本框。')
-st.code('北方工业大学\t晋元庄路5号\t可预约\n首都师范大学信息工程学院\t西三环北路56号\t预约已满',language='text')
-pasted=st.text_area('粘贴地点列表（每行一个地点）',height=165,placeholder='北方工业大学\t晋元庄路5号\t可预约')
-left,right=st.columns(2)
-with left:
-    if st.button('导入粘贴的地点',type='primary'):
-        parsed=parse_places(pasted)
-        if parsed.empty: st.error('没有识别到地点。请检查是否每行一个地点。')
-        else:
-            st.session_state.places_df=parsed
-            st.session_state.mapped=None
-            st.success(f'已导入 {len(parsed)} 个地点。')
-with right:
-    if st.button('载入之前截图中的 16 个北京考点（示例）'):
-        st.session_state.places_df=pd.DataFrame(SAMPLE,columns=COLUMNS)
-        st.session_state.mapped=None
+st.write('将截图发给 ChatGPT，请它输出每行「地点名称、地址、预约状态」，用 Tab 分隔，然后复制到下方。')
+st.caption('以下仅为输入格式示例，请替换成你自己的地点：')
+st.code('北京大学\t北京市海淀区颐和园路5号\t可预约', language='text')
+pasted = st.text_area('粘贴地点列表（每行一个地点）', height=150,
+                      placeholder='北京大学\t北京市海淀区颐和园路5号\t可预约')
+if st.button('导入粘贴的地点', type='primary'):
+    parsed = parse_places(pasted)
+    if parsed.empty:
+        st.error('没有识别到地点，请检查是否每行一个地点。')
+    else:
+        st.session_state.places_df = parsed
+        st.session_state.mapped = None
+        st.session_state.pop('places_editor', None)
+        st.success(f'已导入 {len(parsed)} 个地点。')
 
 st.subheader('② 核对地点和地址')
-places=st.data_editor(st.session_state.places_df,num_rows='dynamic',hide_index=True,
-                      key='places_editor',use_container_width=True)
-st.caption('可直接修改错误名称或地址，也可新增、删除考点。定位前请检查校区和楼栋信息。')
+st.caption(f'当前已导入 {len(st.session_state.places_df)} 个地点。需要修改时点击下方展开。')
+with st.expander('展开核对 / 编辑全部地点', expanded=False):
+    places = st.data_editor(
+        st.session_state.places_df, num_rows='dynamic', hide_index=True,
+        key='places_editor', use_container_width=True,
+        column_config={
+            'name': st.column_config.TextColumn('地点名称', required=True),
+            'address': st.column_config.TextColumn('地址'),
+            'availability': st.column_config.SelectboxColumn(
+                '是否可预约', options=['可预约', '预约已满', '未知'])
+        }
+    )
+    st.caption('修改名称、地址、预约状态，或添加、删除地点；生成地图时自动采用当前表格内容。')
+# Expander 收起后编辑结果仍然参与地图计算。
+if 'places_editor' not in st.session_state:
+    places = st.session_state.places_df.copy()
+
 origin=st.text_input('③ 输入出发地（北京地址、地铁站或学校）',placeholder='例如：北京市海淀区五道口地铁站')
 mode=st.selectbox('排序方式',['公共交通时间','驾车时间','直线距离'])
 exclude_full=st.checkbox('排名中排除预约已满考点',value=True)
@@ -172,34 +174,72 @@ if st.button('④ 高德定位并计算通勤',type='primary'):
         except Exception as e: st.error(f'请求失败：{e}')
 
 if st.session_state.mapped is not None:
-    df=st.session_state.mapped.copy()
-    st.subheader('⑤ 结果和推荐排名')
-    st.warning('高德返回的是候选地理编码结果，街道级或区域级匹配可能不准确。请检查匹配地址；通勤时间是接口估算值，不代表考试当天实时路况。')
-    if exclude_full: df=df[df.availability!='预约已满']
-    sort='distance_km' if mode=='直线距离' else 'commute_min'
-    df=df.sort_values([sort,'name'],na_position='last')
-    st.dataframe(df[['name','address','availability','commute_min','distance_km','matched_address','precision','note']],hide_index=True,use_container_width=True)
-    valid=st.session_state.mapped.dropna(subset=['latitude','longitude'])
+    all_df = st.session_state.mapped.copy()
+    st.subheader('⑤ 地点地图')
+    valid = all_df.dropna(subset=['latitude', 'longitude'])
     if not valid.empty:
-        m=folium.Map(location=[valid.latitude.mean(),valid.longitude.mean()],zoom_start=11,control_scale=True)
-        bounds=[]
-        for _,r in valid.iterrows():
-            lat_gcj,lon_gcj=float(r.latitude),float(r.longitude)
-            lon,lat=gcj_to_wgs(lon_gcj,lat_gcj)
-            bounds.append([lat,lon])
-            status=str(r.availability)
-            link='https://uri.amap.com/search?keyword='+quote(str(r['name']))+'&city=北京'
-            content=f'<b>{escape(str(r["name"]))}</b><br>{escape(str(r["address"]))}<br>{escape(status)}<br><a href="{link}" target="_blank">高德搜索核对</a>'
-            folium.Marker([lat,lon],tooltip=str(r['name']),popup=folium.Popup(content,max_width=320),
-                          icon=folium.Icon(color='red' if status=='预约已满' else 'blue')).add_to(m)
-        origin_point=st.session_state.get('origin_point')
+        m = folium.Map(location=[39.90, 116.40], zoom_start=10, control_scale=True)
+        bounds = []
+        for _, r in valid.iterrows():
+            lon, lat = gcj_to_wgs(float(r.longitude), float(r.latitude))
+            bounds.append([lat, lon])
+            status = str(r.availability)
+            link = 'https://uri.amap.com/search?keyword=' + quote(str(r['name'])) + '&city=北京'
+            content = (f'<b>{escape(str(r["name"]))}</b><br>'
+                       f'{escape(str(r["address"]))}<br>{escape(status)}<br>'
+                       f'<a href="{link}" target="_blank">高德搜索核对</a>')
+            folium.Marker(
+                [lat, lon], tooltip=str(r['name']),
+                popup=folium.Popup(content, max_width=320),
+                icon=folium.Icon(color='red' if status == '预约已满' else 'blue')
+            ).add_to(m)
+        origin_point = st.session_state.get('origin_point')
         if origin_point:
-            olon,olat=gcj_to_wgs(*origin_point[:2])
-            folium.Marker([olat,olon],tooltip='出发地',icon=folium.Icon(color='green')).add_to(m)
-            bounds.append([olat,olon])
-        if len(bounds)>1: m.fit_bounds(bounds,padding=(20,20))
-        st_folium(m,height=540,width=None,returned_objects=[])
-        st.caption('地图使用 OpenStreetMap 底图，并对高德 GCJ-02 坐标进行近似 WGS84 转换。结果仅供选址参考，具体位置与路线请在高德地图核对。')
-        st.download_button('下载选址比较 CSV',df.to_csv(index=False).encode('utf-8-sig'),'beijing_venues.csv','text/csv')
-        st.download_button('下载交互式 HTML 地图',m.get_root().render().encode('utf-8'),'beijing_map.html','text/html')
-    else: st.error('尚无可显示的有效坐标。')
+            olon, olat = gcj_to_wgs(*origin_point[:2])
+            folium.Marker([olat, olon], tooltip='出发地',
+                          icon=folium.Icon(color='green')).add_to(m)
+            bounds.append([olat, olon])
+        if len(bounds) > 1:
+            m.fit_bounds(bounds, padding=(20, 20))
+        st_folium(m, height=460, width=None, returned_objects=[], key='beijing_map')
+        st.caption('蓝色：可预约 / 未知；红色：预约已满；绿色：出发地。地图坐标为近似转换，请以高德导航核对。')
+        st.download_button('下载交互式 HTML 地图', m.get_root().render().encode('utf-8'),
+                           'beijing_map.html', 'text/html')
+    else:
+        st.warning('尚无有效坐标，无法显示地图。请核对地点地址和 API Key。')
+
+    st.subheader('⑥ 推荐排名')
+    df = all_df.copy()
+    if exclude_full:
+        df = df[df.availability != '预约已满']
+    sort_col = 'distance_km' if mode == '直线距离' else 'commute_min'
+    # 不把没有有效排序数据的地点错误地推荐为最优。
+    ranked = df.dropna(subset=[sort_col]).sort_values([sort_col, 'name'])
+    if not origin.strip():
+        st.info('请输入出发地并重新计算，才能得到最优地点推荐。')
+    elif ranked.empty:
+        st.warning('没有可用的通勤或距离数据，暂时无法推荐最优地点。请检查接口返回结果。')
+    else:
+        def show_place_card(r, rank=None):
+            with st.container(border=True):
+                title = str(r['name'])
+                st.markdown(f'**{str(rank) + ". " if rank is not None else ""}{escape(title)}**')
+                commute = '暂无数据' if pd.isna(r['commute_min']) else f'{r["commute_min"]:g} 分钟'
+                distance = '暂无数据' if pd.isna(r['distance_km']) else f'{r["distance_km"]:g} 公里'
+                st.write(f'通勤时间：{commute}  ·  直线距离：{distance}')
+                st.write(f'是否可预约：{r["availability"]}')
+
+        st.caption(f'当前按「{mode}」排序，默认仅展示第一名。')
+        show_place_card(ranked.iloc[0], 1)
+        if len(ranked) > 1:
+            with st.expander(f'展开全部推荐地点（共 {len(ranked)} 个）', expanded=False):
+                for i, (_, row) in enumerate(ranked.iloc[1:].iterrows(), start=2):
+                    show_place_card(row, i)
+    unresolved = all_df[all_df['note'].fillna('').astype(str).ne('')]
+    if not unresolved.empty:
+        with st.expander(f'查看定位异常地点（{len(unresolved)} 个）', expanded=False):
+            for _, row in unresolved.iterrows():
+                st.write(f'{row["name"]}：{row["note"]}')
+    st.download_button('下载全部选址比较 CSV', all_df.to_csv(index=False).encode('utf-8-sig'),
+                       'beijing_venues.csv', 'text/csv')
+    st.caption('高德结果可能匹配到街道或区域而非精确考点；通勤时间是估算值，不代表考试当天实时交通。')
